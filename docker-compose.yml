@@ -1,0 +1,56 @@
+version: "3"
+services:
+  # Customized geth image for indexer
+  geth:
+    image: quay.io/amis/indexer-geth:indexer-1.8.21
+    ports:
+      - "30303:30303"
+      - "8546:8546"
+    volumes:
+      - ${GETH_DATA_PATH}:/root/.ethereum
+    command: "--gcmode=archive --syncmode=full --wsapi \"eth,debug\" --ws --wsaddr 0.0.0.0 --wsport 8546 --wsorigins \"*\""
+    restart: always
+    depends_on:
+      - idx-database
+  idx-database:
+    image: mysql:5.7
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=my-secret-pw
+      - MYSQL_CHARSET=utf8
+      - MYSQL_DATABASE=ethdb
+    volumes:
+      - ${MYSQL_DATA_PATH}:/var/lib/mysql
+  idx-migration:
+    build:
+      context: ./migration
+    command: ["rake", "db:migrate"]
+    restart: on-failure
+    depends_on:
+      - idx-database
+    environment:
+      - RAILS_ENV=customized
+      - HOST=idx-database
+      - PORT=3306
+      - DATABASE=ethdb
+      - USERNAME=root
+      - PASSWORD=my-secret-pw
+  indexer:
+    build:
+      context: .
+      dockerfile: ./cmd/Dockerfile
+    command:
+      - indexer
+      - --eth
+      - "ws://geth:8546"
+      - --functions.erc20token
+      - --indexer.db.cred.host
+      - "idx-database"
+    restart: on-failure
+    depends_on:
+      - idx-database
+      - idx-migration
+      - geth
+    volumes:
+      - ./configs:/configs
